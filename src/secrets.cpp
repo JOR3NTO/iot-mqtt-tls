@@ -118,7 +118,7 @@ const char* root_ca = ROOT_CA;
 // Los defines se aplican desde add_env_defines.py
 // Si MQTT_SERVER está definido pero vacío, se usará el valor por defecto del #ifndef
 const char* mqtt_server = MQTT_SERVER;            ///< Dirección de tu servidor MQTT
-const int mqtt_port = MQTT_PORT;                  ///< Puerto seguro (TLS)
+const int mqtt_port = 8883;                  ///< Puerto seguro (TLS)
 const char* mqtt_user = MQTT_USER;                ///< Usuario MQTT
 const char* mqtt_password = MQTT_PASSWORD;        ///< Contraseña MQTT
 
