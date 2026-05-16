@@ -1,3 +1,15 @@
+/**
+ * @file    libiot.cpp
+ * @brief   Implementación del módulo IoT: MQTT/TLS, alertas, y publicación GPS
+ * @details Gestiona la conexión segura al broker EMQX vía TLS, la reconexión
+ *          automática, la recepción de mensajes (alertas y OTA), y la publicación
+ *          de datos GPS del rastreador de mascotas en formato JSON.
+ *
+ *          Se removió toda la lógica del sensor SHT21 (temperatura/humedad).
+ *          La función sendGPSData() reemplaza a sendSensorData() y publica
+ *          SIEMPRE (incluso sin fix GPS) para que Grafana detecte pérdida de señal.
+ */
+
 /*
  * The MIT License
  *
@@ -23,7 +35,7 @@
  */
 
 #include <libiot.h>
-#include <SHTSensor.h>
+#include <Wire.h>
 #include <libota.h>
 #include <libstorage.h>
 
@@ -43,13 +55,14 @@
 #define PRINT(x)
 #endif
 
-SHTSensor sht;     //Sensor SHT21
 String alert = ""; //Mensaje de alerta
 extern const char * client_id;  //ID del cliente MQTT
 
 
 /**
- * Consulta y guarda el tiempo actual con servidores SNTP.
+ * @brief   Consulta y guarda el tiempo actual con servidores SNTP.
+ * @details Sincroniza con pool.ntp.org y time.nist.gov, zona horaria UTC-5 (Colombia).
+ * @return  Timestamp actual (epoch)
  */
 time_t setTime() {
   //Sincroniza la hora del dispositivo con el servidor SNTP (Simple Network Time Protocol)
@@ -74,9 +87,8 @@ static unsigned long lastMQTTDebug = 0;
 static const unsigned long MQTT_DEBUG_INTERVAL = 30000; // 30 segundos
 
 /**
- * Conecta el dispositivo con el bróker MQTT usando
- * las credenciales establecidas.
- * Si ocurre un error lo imprime en la consola.
+ * @brief   Conecta el dispositivo con el bróker MQTT usando las credenciales establecidas.
+ * @details Si ocurre un error lo imprime en la consola. Hace healthcheck cada 30 segundos.
  */
 void checkMQTT() {
   if (!client.connected()) {
@@ -101,7 +113,8 @@ void checkMQTT() {
 }
 
 /**
- * Adquiere la dirección MAC del dispositivo y la retorna en formato de cadena.
+ * @brief   Adquiere la dirección MAC del dispositivo y la retorna en formato de cadena.
+ * @return  String con formato "ESP32-XXXXXXXXXXXX"
  */
 String getMacAddress() {
   uint8_t mac[6];
@@ -114,7 +127,9 @@ String getMacAddress() {
 
 
 /**
- * Función que se ejecuta cuando se establece conexión con el servidor MQTT
+ * @brief   Función que se ejecuta cuando se establece conexión con el servidor MQTT
+ * @details Intenta reconectar en bucle, suscribiéndose al tópico de entrada
+ *          y configurando OTA al conectar exitosamente.
  */
 void reconnect() {
   while (!client.connected()) { //Mientras no esté conectado al servidor MQTT
@@ -176,7 +191,9 @@ void reconnect() {
 
 
 /**
- * Función setupIoT que configura el certificado raíz, el servidor MQTT y el puerto
+ * @brief   Configura el certificado raíz, el servidor MQTT y el puerto
+ * @details Inicializa I2C, TLS, buffer MQTT (1024 bytes), callback de recepción
+ *          y sincroniza la hora vía SNTP. Ya NO inicializa el sensor SHT21.
  */
 void setupIoT() {
   Wire.begin();                 //Inicializa el bus I2C: (SDA, SCL)
@@ -201,49 +218,15 @@ void setupIoT() {
   Serial.println("Callback MQTT configurado: receivedCallback");
   Serial.println("==========================");
   setTime();                    //Ajusta el tiempo del dispositivo con servidores SNTP
-  setupSHT();                   //Configura el sensor SHT21
+  // NOTA: Se removió setupSHT() — ya no hay sensor de temperatura/humedad
 }
 
 
 /**
- * Configura el sensor SHT21
- */
-void setupSHT() {
-  if (sht.init()) Serial.print("SHT init(): Exitoso\n");
-  else Serial.print("SHT init(): Fallido\n");
-  sht.setAccuracy(SHTSensor::SHT_ACCURACY_MEDIUM); // soportado solo por el SHT3x
-}
-
-
-/**
- * Verifica si ya es momento de hacer las mediciones de las variables.
- * si ya es tiempo, mide y envía las mediciones.
- */
-bool measure(SensorData * data) {
-  if ((millis() - measureTime) >= MEASURE_INTERVAL * 1000 ) {
-    PRINTLN("\nMidiendo variables...");
-    measureTime = millis();    
-    if (sht.readSample()) {
-        data->temperature = sht.getTemperature();
-        data->humidity = sht.getHumidity();
-        PRINT(" %RH ❖ Temperatura: ");
-        PRINTD(data->humidity, 2);
-        PRINT(" %RH ❖ Temperatura: ");
-        PRINTD(data->temperature, 2);
-        PRINTLN(" °C");
-        return true;
-    } else {
-        Serial.print("Error leyendo la muestra\n");
-        return false;
-    }
-  }
-  return false;
-}
-
-/**
- * Verifica si ha llegdo alguna alerta al dispositivo.
- * Si no ha llegado devuelve OK, de lo contrario retorna la alerta.
- * También asigna el tiempo en el que se dispara la alerta.
+ * @brief   Verifica si ha llegado alguna alerta al dispositivo.
+ * @details Si no ha llegado devuelve "OK", de lo contrario retorna la alerta.
+ *          La alerta se borra automáticamente después de ALERT_DURATION segundos.
+ * @return  Mensaje de alerta activo o "OK"
  */
 String checkAlert() {
   if (alert.length() != 0) {
@@ -256,25 +239,33 @@ String checkAlert() {
 }
 
 /**
- * Publica la temperatura y humedad dadas al tópico configurado usando el cliente MQTT.
+ * @brief   Publica los datos GPS al tópico MQTT configurado
+ * @details Publica SIEMPRE, incluso si el fix es inválido (fix:false).
+ *          Esto permite que Grafana detecte cuando el GPS pierde señal.
+ *          Usa la función gpsToJson() de libgps.cpp para generar el payload.
+ *
+ *          El intervalo de publicación se controla desde main.cpp (cada 5 segundos)
+ *          para no saturar el broker con mensajes frecuentes pero manteniendo
+ *          una resolución temporal adecuada para rastreo de mascotas.
+ *
+ * @param   data  Puntero a la estructura GPSData con las coordenadas a publicar
  */
-void sendSensorData(float temperatura, float humedad) {
-  String data = "{";
-  data += "\"temperatura\": "+ String(temperatura, 1) +", ";
-  data += "\"humedad\": "+ String(humedad, 1);
-  data += "}";
-  char payload[data.length()+1];
-  data.toCharArray(payload,data.length()+1);
-  PRINTLN("client id: " + String(client_id) + "\ntopic: " + String(MQTT_TOPIC_PUB) + "\npayload: " + data);
-  client.publish(MQTT_TOPIC_PUB, payload);
+void sendGPSData(GPSData* data) {
+  String json = gpsToJson(data);
+  Serial.println("[MQTT] Publicando GPS → " + String(MQTT_TOPIC_PUB));
+  Serial.println("[MQTT] Payload: " + json);
+  client.publish(MQTT_TOPIC_PUB, json.c_str());
 }
 
 
 /**
- * Función que se ejecuta cuando llega un mensaje a la suscripción MQTT.
- * Construye el mensaje que llegó y si contiene ALERT lo asgina a la variable 
- * alert que es la que se lee para mostrar los mensajes.
- * También verifica si el mensaje es para actualización OTA.
+ * @brief   Callback ejecutado al recibir un mensaje MQTT
+ * @details Construye el mensaje que llegó y si contiene ALERT lo asigna a la variable 
+ *          alert que es la que se lee para mostrar los mensajes.
+ *          También verifica si el mensaje es para actualización OTA.
+ * @param   topic   Tópico del mensaje recibido
+ * @param   payload Contenido del mensaje en bytes
+ * @param   length  Longitud del payload
  */
 void receivedCallback(char* topic, byte* payload, unsigned int length) {
   Serial.println("\n*** CALLBACK MQTT DISPARADO ***");
@@ -330,8 +321,8 @@ void receivedCallback(char* topic, byte* payload, unsigned int length) {
 }
 
 /**
- * Función de prueba: Publica un mensaje de prueba y verifica recepción
- * Útil para diagnosticar problemas de MQTT
+ * @brief   Función de prueba: Publica un mensaje de prueba y verifica recepción
+ * @details Útil para diagnosticar problemas de MQTT
  */
 void testMQTTCallback() {
   if (!client.connected()) {

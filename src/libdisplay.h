@@ -1,3 +1,11 @@
+/**
+ * @file    libdisplay.h
+ * @brief   Módulo de pantalla OLED SSD1306 para rastreador de mascotas
+ * @details Gestiona la pantalla OLED I2C 128x64 para mostrar datos GPS
+ *          (coordenadas, velocidad, altitud, satélites) y mensajes de estado.
+ *          Se removieron las funciones de visualización de temperatura/humedad.
+ */
+
 /*
  * The MIT License
  *
@@ -28,19 +36,52 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Wire.h>
-#include <time.h>
+#include <libgps.h>
 
 #define SCREEN_WIDTH 128    ///< Ancho de la pantalla (en pixeles)
 #define SCREEN_HEIGHT 64    ///< Alto de la pantalla (en pixeles)
 
 extern Adafruit_SSD1306 display; ///< Pantalla OLED vinculada al dispositivo
 
-void startDisplay();                    ///< Vincula la pantalla al dispositivo y asigna el color de texto blanco como predeterminado. 
-void displayNoSignal();                 ///< Imprime en la pantalla un mensaje de "No hay señal".
-void displayHeader(time_t now);         ///< Agrega a la pantalla el header con mensaje "IOT Sensors" y en seguida la hora actual
-void displayMeasures(float temp, float humi);  ///< Agrega los valores medidos de temperatura y humedad a la pantalla
-void displayMessage(String message);    ///< Agrega el mensaje indicado a la pantalla. Si el mensaje es OK, se busca mostrarlo centrado.
-void displayConnecting(String ssid);    ///< Muestra en la pantalla el mensaje de "Connecting to:" y luego el nombre de la red a la que se conecta.
-void displayLoop(String message, time_t now, float temp, float humi); ///< Muestra en la pantalla el mensaje recibido, las medidas de temperatura y humedad.
+/**
+ * @brief   Vincula la pantalla al dispositivo y asigna el color de texto blanco
+ */
+void startDisplay();
+
+/**
+ * @brief   Imprime en la pantalla un mensaje de "No hay señal"
+ */
+void displayNoSignal();
+
+/**
+ * @brief   Muestra en la pantalla el mensaje de "Conectando a:" con el SSID
+ * @param   ssid  Nombre de la red WiFi a la que se conecta
+ */
+void displayConnecting(String ssid);
+
+/**
+ * @brief   Muestra los datos GPS en la pantalla OLED 128x64
+ * @details Layout con fix válido:
+ *          ┌────────────────┐
+ *          │=== PetTracker =│
+ *          │Lat: 4.12345    │  ← 5 decimales
+ *          │Lon:-76.12345   │  ← 5 decimales
+ *          │Vel: 2.3 km/h   │
+ *          │Sats:8  Alt:NNNm│
+ *          │HH:MM:SS        │
+ *          └────────────────┘
+ *
+ *          Layout sin fix:
+ *          ┌────────────────┐
+ *          │=== PetTracker =│
+ *          │                │
+ *          │ Buscando sats  │
+ *          │                │
+ *          │ Sats visibles:N│
+ *          └────────────────┘
+ *
+ * @param   data  Puntero a la estructura GPSData con los datos a mostrar
+ */
+void displayGPSLoop(GPSData* data);
 
 #endif /* LIBDISPLAY_H */

@@ -1,3 +1,12 @@
+/**
+ * @file    secrets.cpp
+ * @brief   Configuración de credenciales y constantes del sistema
+ * @details Almacena las credenciales WiFi, MQTT, certificado raíz TLS,
+ *          tópicos de publicación/suscripción, y credenciales AWS para OTA.
+ *          Todas las credenciales pueden sobrescribirse vía variables de entorno
+ *          (.env) y build_flags en platformio.ini.
+ */
+
 /*
  * The MIT License
  *
@@ -134,10 +143,29 @@ String mqtt_topic_sub( String(COUNTRY) + "/" + String(STATE) + "/"+ String(CITY)
 const char * MQTT_TOPIC_PUB = mqtt_topic_pub.c_str();
 const char * MQTT_TOPIC_SUB = mqtt_topic_sub.c_str();
 
-long long int measureTime = millis();   // Tiempo de la última medición
 long long int alertTime = millis();     // Tiempo en que inició la última alerta
 WiFiClientSecure espClient;             // Conexión TLS/SSL con el servidor MQTT
 PubSubClient client(espClient);         // Cliente MQTT para la conexión con el servidor
 time_t now;                             // Timestamp de la fecha actual.
 const char* ssid = SSID;                // Cambia por el nombre de tu red WiFi
 const char* password = PASSWORD;        // Cambia por la contraseña de tu red WiFi
+
+/*********** Credenciales AWS para OTA via S3 ***********/
+
+#ifndef AWS_ACCESS_KEY_ID
+#define AWS_ACCESS_KEY_ID ""
+#endif
+#ifndef AWS_SECRET_ACCESS_KEY
+#define AWS_SECRET_ACCESS_KEY ""
+#endif
+#ifndef AWS_S3_BUCKET
+#define AWS_S3_BUCKET ""
+#endif
+#ifndef AWS_S3_REGION
+#define AWS_S3_REGION "us-east-1"
+#endif
+
+const char* AWS_ACCESS_KEY = AWS_ACCESS_KEY_ID;
+const char* AWS_SECRET_KEY = AWS_SECRET_ACCESS_KEY;
+const char* AWS_BUCKET     = AWS_S3_BUCKET;
+const char* AWS_REGION     = AWS_S3_REGION;
