@@ -42,17 +42,12 @@ def main():
             print("DEBUG - Conexión sin autenticación")
 
         # Construir TLS
+        # Construir TLS
         tls_params = None
         if os.getenv('MQTT_TLS', 'false').lower() == 'true':
-            tls_params = {
-                'ca_certs': None,
-                'certfile': None,
-                'keyfile': None,
-                'cert_reqs': 1,
-                'tls_version': 4,
-                'ciphers': None
-            }
-            print("DEBUG - Usando TLS")
+            # Usar TLS con certificados por defecto del sistema
+            tls_params = {}
+            print("DEBUG - Usando TLS (CA pública del sistema)")
         else:
             print("DEBUG - Sin TLS")
 
