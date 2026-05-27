@@ -35,6 +35,7 @@
  */
 
 #include <libdisplay.h>
+#include "libgps.h"
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1); // Pantalla OLED vinculada al dispositivo
 

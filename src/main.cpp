@@ -48,6 +48,9 @@
 // Versión del firmware
 #define FIRMWARE_VERSION "v2.0.0"
 
+/// Pin del LED RGB integrado (WS2812) en ESP32-S3 DevKitC-1
+#define LED_RGB_PIN 48
+
 /// Intervalo de publicación GPS por MQTT (en milisegundos).
 /// 5 segundos ofrece un buen balance entre resolución de rastreo y
 /// uso de ancho de banda en el broker EMQX.
@@ -58,6 +61,97 @@ GPSData gpsData;
 
 /// Timestamp de la última publicación MQTT (para temporización no bloqueante)
 static unsigned long lastPublish = 0;
+
+/// Timestamp del último cambio de estado del LED RGB (para evitar parpadeos)
+static unsigned long lastLedUpdate = 0;
+
+/// Último estado conocido del LED (0=rojo, 1=azul, 2=verde) para evitar actualizaciones innecesarias
+static int lastLedState = -1;
+
+/**
+ * @brief   Enciende el LED RGB integrado en color ROJO
+ * @details Indica: sin conexión WiFi o sin conexión MQTT
+ */
+void setLedRed() {
+  neopixelWrite(LED_RGB_PIN, 255, 0, 0);  // R=255, G=0, B=0
+}
+
+/**
+ * @brief   Enciende el LED RGB integrado en color AZUL
+ * @details Indica: WiFi + MQTT conectados, pero GPS sin fix
+ */
+void setLedBlue() {
+  neopixelWrite(LED_RGB_PIN, 0, 0, 255);  // R=0, G=0, B=255
+}
+
+/**
+ * @brief   Enciende el LED RGB integrado en color VERDE
+ * @details Indica: WiFi + MQTT + GPS con señal válida (sistema operativo)
+ */
+void setLedGreen() {
+  neopixelWrite(LED_RGB_PIN, 0, 255, 0);  // R=0, G=255, B=0
+}
+
+/**
+ * @brief   Apaga el LED RGB integrado
+ */
+void setLedOff() {
+  neopixelWrite(LED_RGB_PIN, 0, 0, 0);  // R=0, G=0, B=0
+}
+
+/**
+ * @brief   Actualiza el color del LED RGB según el estado de WiFi, MQTT y GPS
+ * @details Lógica de estados:
+ *          - ROJO: sin WiFi O sin MQTT
+ *          - AZUL: WiFi + MQTT OK, pero GPS sin fix
+ *          - VERDE: WiFi + MQTT + GPS con fix válido
+ */
+void updateLedStatus() {
+  // Evitar actualizar el LED cada iteración; usar timestamp para limitar frecuencia
+  if (millis() - lastLedUpdate < 500) {
+    return;  // Actualizar solo cada 500ms para reducir parpadeos
+  }
+  lastLedUpdate = millis();
+
+  // Determinar el estado del LED según conectividad
+  int newLedState = -1;
+
+  // Comprobar estados de conexión
+  bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+  bool mqttConnected = client.connected();  // Cliente MQTT de PubSubClient
+  bool gpsValid = gpsData.valid && gpsData.satellites > 0;
+
+  // Determinar nuevo estado
+  if (!wifiConnected || !mqttConnected) {
+    // Sin WiFi o sin MQTT → ROJO
+    newLedState = 0;
+  } else if (!gpsValid) {
+    // WiFi + MQTT OK, pero GPS sin fix → AZUL
+    newLedState = 1;
+  } else {
+    // Todo OK: WiFi + MQTT + GPS válido → VERDE
+    newLedState = 2;
+  }
+
+  // Solo actualizar si el estado cambió (evitar parpadeos innecesarios)
+  if (newLedState != lastLedState) {
+    lastLedState = newLedState;
+    switch (newLedState) {
+      case 0:
+        setLedRed();
+        Serial.println("[LED] Rojo - sin WiFi o sin MQTT");
+        break;
+      case 1:
+        setLedBlue();
+        Serial.println("[LED] Azul - WiFi+MQTT OK, GPS buscando satélites");
+        break;
+      case 2:
+        setLedGreen();
+        Serial.println("[LED] Verde - Sistema operativo (WiFi+MQTT+GPS)");
+        break;
+    }
+  }
+}
 
 /**
  * @brief   Configura el dispositivo: WiFi, MQTT/TLS, GPS, OLED, OTA
@@ -74,6 +168,10 @@ static unsigned long lastPublish = 0;
 void setup() {
   Serial.begin(115200);     // Paso 1. Inicializa el puerto serie
   delay(1000);              // Espera a que el puerto serie se estabilice
+  
+  // Inicializar LED RGB en ROJO (indicando estado inicial sin conexión)
+  setLedRed();
+  Serial.println("[LED] Inicializado en ROJO");
   
   // Imprimir información del firmware al inicio
   // Usar la versión guardada en memoria no volátil (si existe) o la constante por defecto
@@ -165,7 +263,10 @@ void loop() {
   // No usa delay() — solo procesa lo que haya disponible en ese momento.
   readGPS(&gpsData);
 
-  // Paso 4. Cada GPS_PUBLISH_INTERVAL ms: actualizar OLED y publicar MQTT
+  // Paso 4. Actualizar estado del LED RGB según conectividad y GPS
+  updateLedStatus();
+
+  // Paso 5. Cada GPS_PUBLISH_INTERVAL ms: actualizar OLED y publicar MQTT
   if (millis() - lastPublish >= GPS_PUBLISH_INTERVAL) {
     lastPublish = millis();
     displayGPSLoop(&gpsData);   // Actualiza la pantalla OLED con datos GPS

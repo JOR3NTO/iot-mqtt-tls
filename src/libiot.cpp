@@ -38,6 +38,7 @@
 #include <Wire.h>
 #include <libota.h>
 #include <libstorage.h>
+#include "libgps.h"
 
 // Versión del firmware (debe coincidir con main.cpp)
 #ifndef FIRMWARE_VERSION
@@ -248,7 +249,7 @@ String checkAlert() {
  *          para no saturar el broker con mensajes frecuentes pero manteniendo
  *          una resolución temporal adecuada para rastreo de mascotas.
  *
- * @param   data  Puntero a la estructura GPSData con las coordenadas a publicar
+ * 
  */
 void sendGPSData(GPSData* data) {
   String json = gpsToJson(data);
