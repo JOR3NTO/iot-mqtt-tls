@@ -55,23 +55,7 @@ jobs:
       - name: Publish MQTT OTA message
         run: |
           pip install paho-mqtt
-          python3 -c "import os, json, paho.mqtt.publish as publish; \
-          url = 'https://{bucket}.s3.{region}.amazonaws.com/{firmware}'.format( \
-            bucket=os.getenv('S3_BUCKET_NAME'), \
-            region=os.getenv('AWS_REGION'), \
-            firmware=os.getenv('FIRMWARE_NAME') \
-          ); \
-          payload = json.dumps({ 'version': os.getenv('FIRMWARE_VERSION'), 'url': url }); \
-          publish.single( \
-            topic=os.getenv('DEVICE_TOPIC'), \
-            payload=payload, \
-            hostname=os.getenv('MQTT_SERVER'), \
-            port=int(os.getenv('MQTT_PORT')), \
-            auth={ 'username': os.getenv('MQTT_USER'), 'password': os.getenv('MQTT_PASSWORD') } if os.getenv('MQTT_USER') else None, \
-            tls={} if os.getenv('MQTT_TLS', 'false') == 'true' else None \
-          ); \
-          print('✅ Mensaje OTA enviado')"
-
+          python3 scripts/publish_ota_mqtt.py
         env:
           DEVICE_TOPIC: dispositivo/device1/ota
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
