@@ -1,3 +1,15 @@
+/**
+ * @file    libdisplay.cpp
+ * @brief   Implementación del módulo de pantalla OLED para rastreador de mascotas
+ * @details Muestra datos GPS (coordenadas, velocidad, altitud, satélites)
+ *          en la pantalla OLED SSD1306 128x64 por I2C. Incluye dos layouts:
+ *          uno para cuando hay fix GPS válido y otro para cuando se están
+ *          buscando satélites.
+ *
+ *          Se removieron las funciones de visualización de temperatura/humedad
+ *          (displayHeader, displayMeasures, displayMessage, displayLoop).
+ */
+
 /*
  * The MIT License
  *
@@ -23,12 +35,14 @@
  */
 
 #include <libdisplay.h>
+#include "libgps.h"
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1); // Pantalla OLED vinculada al dispositivo
 
 /**
- * Vincula la pantalla al dispositivo y asigna el color de texto blanco como predeterminado.
- * Si no es exitosa la vinculación, se muestra un mensaje en consola.
+ * @brief   Vincula la pantalla al dispositivo y asigna el color de texto blanco como predeterminado.
+ * @details Si no es exitosa la vinculación, se muestra un mensaje en consola
+ *          y el programa se detiene indefinidamente.
  */
 void startDisplay() {
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Dirección 0x3D para 128x64
@@ -39,7 +53,7 @@ void startDisplay() {
 }
 
 /**
- * Imprime en la pantalla un mensaje de "No hay señal".
+ * @brief   Imprime en la pantalla un mensaje de "No hay señal".
  */
 void displayNoSignal() {
   display.clearDisplay(); // Limpia la pantalla
@@ -50,51 +64,9 @@ void displayNoSignal() {
 }
 
 /**
- * Agrega a la pantalla el header con mensaje "IOT Sensors" y en seguida la hora actual
- */
-void displayHeader(time_t now) {  // Se recibe el tiempo actual como parámetro
-  display.setTextSize(1);         // Tamaño de texto 1
-  long int milli = now + millis() / 1000; // Se obtiene el tiempo en milisegundos 
-  struct tm* tinfo;               // Estructura para almacenar la información de la hora
-  tinfo = localtime(&milli);      // Se obtiene la hora actual
-  String hour = String(asctime(tinfo)).substring(11, 19); // Se obtiene la hora en formato hh:mm:ss
-  String title = "IOT Sensors  " + hour;  // Se crea el título con la hora
-  display.println(title);         // Se imprime el título en la pantalla
-}
-
-/**
- * Agrega los valores medidos de temperatura y humedad a la pantalla.
- */
-void displayMeasures(float temp, float humi) {
-  display.println("");
-  display.print("T: ");
-  display.print(temp);  // Se imprime la temperatura
-  display.print("    ");
-  display.print("H: ");
-  display.print(humi);  // Se imprime la humedad
-  display.println("");
-}
-
-/**
- * Agrega el mensaje indicado a la pantalla.
- * Si el mensaje es OK, se busca mostrarlo centrado.
- */
-void displayMessage(String message) {
-  display.setTextSize(1);     // Tamaño de texto 1
-  display.println("\nMsg:");  // Se imprime el mensaje
-  display.setTextSize(2);     // Tamaño de texto 2
-  if (message.equals("OK")) { // Si el mensaje es OK
-    display.println("    " + message);  // Se imprime centrado
-  } else {
-    display.println("");      // Se imprime un salto de línea
-    display.setTextSize(1);   // Tamaño de texto 1
-    display.println(message); // Se imprime el mensaje en la pantalla
-  }
-}
-
-/**
- * Muestra en la pantalla el mensaje de "Connecting to:" 
- * y luego el nombre de la red a la que se conecta.
+ * @brief   Muestra en la pantalla el mensaje de "Conectando a:"
+ *          y luego el nombre de la red a la que se conecta.
+ * @param   ssid  Nombre de la red WiFi
  */
 void displayConnecting(String ssid) {
   display.clearDisplay();      // Limpia la pantalla
@@ -105,14 +77,65 @@ void displayConnecting(String ssid) {
 }
 
 /**
- * Muestra en la pantalla el mensaje recibido.
- * Se recibe el mensaje, la hora actual, la temperatura y la humedad.
+ * @brief   Muestra los datos GPS en la pantalla OLED 128x64
+ * @details Usa tamaño de texto 1 (6x8 px por carácter) para aprovechar
+ *          las 8 líneas disponibles (64px / 8px = 8 líneas).
+ *
+ *          Si hay fix válido, muestra:
+ *          - Línea 0: Título "=== PetTracker ="
+ *          - Línea 1: Latitud con 5 decimales
+ *          - Línea 2: Longitud con 5 decimales
+ *          - Línea 3: Velocidad en km/h
+ *          - Línea 4: Satélites y altitud
+ *          - Línea 5: Timestamp UTC (HH:MM:SS)
+ *
+ *          Si NO hay fix, muestra:
+ *          - Título, mensaje "Buscando sats" y conteo de satélites visibles
+ *
+ * @param   data  Puntero a la estructura GPSData con los datos a mostrar
  */
-void displayLoop(String message, time_t now, float temp, float humi) {
+void displayGPSLoop(GPSData* data) {
   display.clearDisplay();
-  display.setCursor(0,0); 
-  displayHeader(now);
-  displayMeasures(temp, humi);
-  displayMessage(message);
-  display.display();
+  display.setCursor(0, 0);
+  display.setTextSize(1);  // Cada carácter ocupa 6x8 px → 21 chars × 8 líneas
+
+  // Línea 0: Título
+  display.println("=== PetTracker =");
+
+  if (data->valid) {
+    // ── Layout con fix válido ──────────────────────────────────────
+
+    // Línea 1: Latitud (5 decimales)
+    display.print("Lat: ");
+    display.println(data->latitude, 5);
+
+    // Línea 2: Longitud (5 decimales)
+    display.print("Lon:");
+    display.println(data->longitude, 5);
+
+    // Línea 3: Velocidad en km/h
+    display.print("Vel: ");
+    display.print(data->speed, 1);
+    display.println(" km/h");
+
+    // Línea 4: Satélites y altitud compactos
+    display.print("Sats:");
+    display.print(data->satellites);
+    display.print("  Alt:");
+    display.print((int)data->altitude);
+    display.println("m");
+
+    // Línea 5: Timestamp UTC
+    display.println(data->timestamp);
+
+  } else {
+    // ── Layout sin fix (buscando satélites) ────────────────────────
+    display.println("");          // Línea 1: vacía
+    display.println(" Buscando sats");  // Línea 2: mensaje centrado
+    display.println("");          // Línea 3: vacía
+    display.print(" Sats visibles:");
+    display.println(data->satellites);
+  }
+
+  display.display();  // Enviar el buffer a la pantalla
 }
